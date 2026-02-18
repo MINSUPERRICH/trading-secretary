@@ -5,7 +5,7 @@ from tradingview_screener import Query, col
 st.set_page_config(page_title="Secure Watchlist Secretary", layout="wide")
 
 # --- 🔒 SECURITY ---
-MY_PASSWORD = "rich" 
+MY_PASSWORD = st.secrets["APP_PASSWORD"]
 
 with st.sidebar:
     st.header("🔐 Login")
@@ -153,3 +153,4 @@ if st.session_state.scan_data is not None and not st.session_state.scan_data.emp
 
 elif st.session_state.scan_data is not None:
     st.warning("No Triple Confluence stocks found.")
+
