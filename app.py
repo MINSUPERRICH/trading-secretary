@@ -19,8 +19,13 @@ with st.sidebar:
     st.header("📂 Upload Watchlist")
     uploaded_file = st.file_uploader("Upload .csv or .xlsx", type=["csv", "xlsx"])
 
-st.title("🚀 Watchlist Secretary (Triple 20 EMA)")
-st.markdown("Scanning for **Triple Confluence**: Price > 20 EMA on **Weekly**, **Daily**, and **4H** charts.")
+st.title("🚀 Watchlist Secretary (TSI / MACD Logic)")
+st.markdown("""
+**Triple Confluence + Momentum:**
+1. ✅ **Trend:** Price > 20 EMA on **Weekly**, **Daily**, and **4H**.
+2. 🚀 **Momentum:** Using **MACD (12, 26)** as a proxy for **TSI**.
+   *(Logic: If MACD Line > Signal Line, Momentum is 🟢 GREEN/UP)*
+""")
 
 # --- LOAD WATCHLIST ---
 watchlist_symbols = []
@@ -31,10 +36,7 @@ if uploaded_file:
         else: 
             df_watch = pd.read_excel(uploaded_file)
         
-        # Normalize columns
         df_watch.columns = df_watch.columns.str.lower().str.strip()
-        
-        # Find symbol column
         target_col = next((c for c in df_watch.columns if 'symbol' in c or 'ticker' in c), None)
         
         if target_col:
@@ -50,53 +52,48 @@ if uploaded_file:
 def run_robust_scan():
     q = Query().set_markets('america')
     
-    # WE REQUEST RAW DATA
+    # WE REQUEST TRIPLE EMA + MACD (TSI Proxy)
     q.select(
         'name', 'close', 'volume', 'change',
-        'EMA20',                 # Daily 20 EMA
-        'close|1W', 'EMA20|1W',  # Weekly Data
-        'close|240', 'EMA20|240' # 4-Hour Data
+        'EMA20', 
+        'MACD.macd', 'MACD.signal', # <--- REQUESTING MACD DATA
+        'close|1W', 'EMA20|1W',
+        'close|240', 'EMA20|240'
     )
     
     q.where(col('volume') > 500000)
-    q.limit(3000)
+    q.limit(4000)
     
-    # --- 🛡️ SAFETY CHECK FOR RETURN VALUES ---
-    # This block fixes the "int object has no attribute empty" error
+    # --- 🛡️ SAFETY CHECK ---
     data = q.get_scanner_data()
-    
     df = None
     if isinstance(data, tuple):
-        # Check which part of the tuple is the DataFrame
-        if isinstance(data[0], pd.DataFrame):
-            df = data[0]
-        elif len(data) > 1 and isinstance(data[1], pd.DataFrame):
-            df = data[1]
+        if isinstance(data[0], pd.DataFrame): df = data[0]
+        elif len(data) > 1 and isinstance(data[1], pd.DataFrame): df = data[1]
     elif isinstance(data, pd.DataFrame):
         df = data
 
-    # If we still don't have a dataframe, return empty
     if df is None or df.empty:
         return pd.DataFrame()
         
     # --- FILTER LOGIC ---
-    # 1. Daily: Price > EMA20
+    # 1. Daily Trend
     df = df[df['close'] > df['EMA20']]
     
-    # 2. Weekly: Price > EMA20
+    # 2. Weekly Trend
     df = df[df['close|1W'] > df['EMA20|1W']]
     
-    # 3. 4-Hour: Price > EMA20
+    # 3. 4-Hour Trend
     df = df[df['close|240'] > df['EMA20|240']]
     
     return df
 
 if st.button('🔥 Run Triple-Confluence Scan'):
-    with st.spinner('Scanning US Market (Triple Timeframe)...'):
+    with st.spinner('Scanning US Market...'):
         try:
             df_result = run_robust_scan()
             
-            # Apply Watchlist Filter (if exists)
+            # Apply Watchlist Filter
             if watchlist_symbols and not df_result.empty:
                 df_result = df_result[df_result['name'].isin(watchlist_symbols)]
                 msg = f"🎉 Found {len(df_result)} matches from your list!"
@@ -106,12 +103,20 @@ if st.button('🔥 Run Triple-Confluence Scan'):
             if not df_result.empty:
                 st.success(msg)
                 
-                # Show neat columns
-                show_cols = ['name', 'close', 'change', 'volume', 'EMA20']
+                # Round numbers
+                df_result['MACD.macd'] = df_result['MACD.macd'].round(2)
+                df_result['MACD.signal'] = df_result['MACD.signal'].round(2)
+                
+                # CALCULATE MOMENTUM SIGNAL (Green/Red Bar Logic)
+                df_result['TSI_Proxy'] = df_result.apply(
+                    lambda x: '🟢 UP' if x['MACD.macd'] > x['MACD.signal'] else '🔴 DOWN', axis=1
+                )
+
+                show_cols = ['name', 'close', 'change', 'EMA20', 'TSI_Proxy', 'MACD.macd', 'MACD.signal']
                 st.dataframe(df_result[show_cols], use_container_width=True)
                 
                 csv = df_result.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Download Report", csv, "Triple_Confluence.csv", "text/csv")
+                st.download_button("📥 Download Report", csv, "Triple_Confluence_TSI_Proxy.csv", "text/csv")
             else:
                 st.warning("No stocks met the Triple EMA criteria right now.")
                 
