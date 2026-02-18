@@ -39,7 +39,6 @@ if uploaded_file:
         
         if target_col:
             watchlist_symbols = df_watch[target_col].astype(str).str.upper().str.strip().tolist()
-            # Clean "NASDAQ:AAPL" -> "AAPL"
             watchlist_symbols = [s.split(':')[-1] for s in watchlist_symbols]
             st.sidebar.success(f"✅ Loaded {len(watchlist_symbols)} symbols!")
         else:
@@ -51,22 +50,32 @@ if uploaded_file:
 def run_robust_scan():
     q = Query().set_markets('america')
     
-    # WE REQUEST RAW DATA (No set_interval function calls!)
-    # '240' is 4-Hours. '1W' is Weekly.
+    # WE REQUEST RAW DATA
     q.select(
         'name', 'close', 'volume', 'change',
-        'EMA20',               # Daily 20 EMA
+        'EMA20',                 # Daily 20 EMA
         'close|1W', 'EMA20|1W',  # Weekly Data
         'close|240', 'EMA20|240' # 4-Hour Data
     )
     
-    # Get top 3000 active stocks to ensure we cover the market
     q.where(col('volume') > 500000)
     q.limit(3000)
     
-    # Fetch Data (This returns a DataFrame directly)
-    df, _ = q.get_scanner_data()
+    # --- 🛡️ SAFETY CHECK FOR RETURN VALUES ---
+    # This block fixes the "int object has no attribute empty" error
+    data = q.get_scanner_data()
     
+    df = None
+    if isinstance(data, tuple):
+        # Check which part of the tuple is the DataFrame
+        if isinstance(data[0], pd.DataFrame):
+            df = data[0]
+        elif len(data) > 1 and isinstance(data[1], pd.DataFrame):
+            df = data[1]
+    elif isinstance(data, pd.DataFrame):
+        df = data
+
+    # If we still don't have a dataframe, return empty
     if df is None or df.empty:
         return pd.DataFrame()
         
