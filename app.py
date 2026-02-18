@@ -19,12 +19,12 @@ with st.sidebar:
     st.header("📂 Upload Watchlist")
     uploaded_file = st.file_uploader("Upload .csv or .xlsx", type=["csv", "xlsx"])
 
-st.title("🚀 Watchlist Secretary (TSI / MACD Logic)")
+st.title("🚀 Watchlist Secretary (Triple Confluence + % Gain)")
 st.markdown("""
-**Triple Confluence + Momentum:**
-1. ✅ **Trend:** Price > 20 EMA on **Weekly**, **Daily**, and **4H**.
-2. 🚀 **Momentum:** Using **MACD (12, 26)** as a proxy for **TSI**.
-   *(Logic: If MACD Line > Signal Line, Momentum is 🟢 GREEN/UP)*
+**Strategy:**
+1. ✅ **Triple Trend:** Price > 20 EMA on **Weekly**, **Daily**, and **4H**.
+2. 🚀 **Momentum:** TSI Proxy (MACD) is **🟢 UP**.
+3. 📈 **Performance:** Now showing **% Change** for today.
 """)
 
 # --- LOAD WATCHLIST ---
@@ -52,11 +52,11 @@ if uploaded_file:
 def run_robust_scan():
     q = Query().set_markets('america')
     
-    # WE REQUEST TRIPLE EMA + MACD (TSI Proxy)
+    # WE REQUEST TRIPLE EMA + MACD + CHANGE
     q.select(
-        'name', 'close', 'volume', 'change',
+        'name', 'close', 'volume', 'change', # 'change' is the $ amount
         'EMA20', 
-        'MACD.macd', 'MACD.signal', # <--- REQUESTING MACD DATA
+        'MACD.macd', 'MACD.signal',
         'close|1W', 'EMA20|1W',
         'close|240', 'EMA20|240'
     )
@@ -79,10 +79,8 @@ def run_robust_scan():
     # --- FILTER LOGIC ---
     # 1. Daily Trend
     df = df[df['close'] > df['EMA20']]
-    
     # 2. Weekly Trend
     df = df[df['close|1W'] > df['EMA20|1W']]
-    
     # 3. 4-Hour Trend
     df = df[df['close|240'] > df['EMA20|240']]
     
@@ -103,20 +101,27 @@ if st.button('🔥 Run Triple-Confluence Scan'):
             if not df_result.empty:
                 st.success(msg)
                 
-                # Round numbers
-                df_result['MACD.macd'] = df_result['MACD.macd'].round(2)
-                df_result['MACD.signal'] = df_result['MACD.signal'].round(2)
+                # --- NEW CALCULATION: PERCENTAGE CHANGE ---
+                # Previous Close = Current Price - Change Amount
+                # % Change = (Change Amount / Previous Close) * 100
+                prev_close = df_result['close'] - df_result['change']
+                df_result['Change %'] = ((df_result['change'] / prev_close) * 100).round(2)
                 
-                # CALCULATE MOMENTUM SIGNAL (Green/Red Bar Logic)
+                # Add TSI Proxy
                 df_result['TSI_Proxy'] = df_result.apply(
                     lambda x: '🟢 UP' if x['MACD.macd'] > x['MACD.signal'] else '🔴 DOWN', axis=1
                 )
+                
+                # Round other columns for neatness
+                df_result['change'] = df_result['change'].round(2)
+                df_result['close'] = df_result['close'].round(2)
 
-                show_cols = ['name', 'close', 'change', 'EMA20', 'TSI_Proxy', 'MACD.macd', 'MACD.signal']
+                # Display with the new column
+                show_cols = ['name', 'close', 'Change %', 'change', 'EMA20', 'TSI_Proxy']
                 st.dataframe(df_result[show_cols], use_container_width=True)
                 
                 csv = df_result.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Download Report", csv, "Triple_Confluence_TSI_Proxy.csv", "text/csv")
+                st.download_button("📥 Download Report", csv, "Triple_Confluence_Report.csv", "text/csv")
             else:
                 st.warning("No stocks met the Triple EMA criteria right now.")
                 
