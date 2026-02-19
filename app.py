@@ -19,11 +19,11 @@ with st.sidebar:
     st.header("📂 Upload Watchlist")
     uploaded_file = st.file_uploader("Upload .csv or .xlsx", type=["csv", "xlsx"])
 
-st.title("🚀 Watchlist Secretary (Histogram Signal)")
+st.title("🚀 Watchlist Secretary (Sniper/Slope Signal)")
 st.markdown("""
 **Strategy:**
 1. ✅ **Triple Trend:** Price > 20 EMA on **Weekly**, **Daily**, and **4H**.
-2. 🚀 **4H Signal:** Now using **MACD Histogram** (Faster, matches Sniper bars).
+2. 🚀 **4H Signal:** Uses **Histogram Slope** (Turns Green when momentum shifts UP, matching TSI).
 3. 📉 **1H Trend:** Shows "🔻 DIP" if 1H Price < EMA (Buying Chance).
 """)
 
@@ -51,14 +51,16 @@ if uploaded_file:
 def run_robust_scan():
     q = Query().set_markets('america')
     
+    # We request CURRENT and PREVIOUS MACD to detect the Slope change
     q.select(
         'name', 'close', 'volume', 'change',
         'premarket_close', 'premarket_change',
         'EMA20',               
-        'MACD.macd|240', 'MACD.signal|240', 
-        'close|1W', 'EMA20|1W',
+        'MACD.macd|240', 'MACD.signal|240',    # Current 4H
+        'MACD.macd[1]|240', 'MACD.signal[1]|240', # Previous 4H (for Slope)
+        'close|1W', 'EMA20|1W',  
         'close|240', 'EMA20|240',
-        'close|60', 'EMA20|60'
+        'close|60', 'EMA20|60'   
     )
     
     q.where(col('volume') > 500000)
@@ -85,17 +87,22 @@ def run_robust_scan():
             lambda x: ((x['change'] / (x['close'] - x['change'])) * 100) if (x['close'] - x['change']) != 0 else 0, axis=1
         ).round(2)
 
-        # --- 🚀 NEW HISTOGRAM LOGIC ---
-        # Histogram = MACD Line - Signal Line
-        # If Histogram > 0, the Momentum is UP (Green)
-        df['4H Signal'] = df.apply(
-            lambda x: '🟢 UP' if (x['MACD.macd|240'] - x['MACD.signal|240']) > 0 else '🔴 DOWN', axis=1
-        )
+        # --- 🚀 NEW SLOPE LOGIC ---
+        # Current Histogram = MACD - Signal
+        # Previous Histogram = MACD[1] - Signal[1]
+        # Logic: If Current Hist > Previous Hist, Momentum is turning UP (🟢)
+        def get_signal(row):
+            current_hist = row['MACD.macd|240'] - row['MACD.signal|240']
+            prev_hist = row['MACD.macd[1]|240'] - row['MACD.signal[1]|240']
+            return '🟢 UP' if current_hist > prev_hist else '🔴 DOWN'
+
+        df['4H Signal'] = df.apply(get_signal, axis=1)
 
         df['1H Trend'] = df.apply(
             lambda x: '🟢 UP' if x['close|60'] > x['EMA20|60'] else '🔻 DIP', axis=1
         )
         
+        # Rounding for clean display
         df['change'] = df['change'].round(2)
         df['close'] = df['close'].round(2)
         df['premarket_close'] = df['premarket_close'].fillna(0).round(2)
@@ -103,12 +110,12 @@ def run_robust_scan():
 
     return df
 
-# --- SESSION STATE ---
+# --- SESSION STATE & DISPLAY ---
 if 'scan_data' not in st.session_state:
     st.session_state.scan_data = None
 
 if st.button('🔥 Run Dip Finder Scan'):
-    with st.spinner('Scanning...'):
+    with st.spinner('Scanning with Sniper Logic...'):
         try:
             raw_df = run_robust_scan()
             if watchlist_symbols and not raw_df.empty:
@@ -117,7 +124,6 @@ if st.button('🔥 Run Dip Finder Scan'):
         except Exception as e:
             st.error(f"Scan Error: {e}")
 
-# --- DISPLAY ---
 if st.session_state.scan_data is not None and not st.session_state.scan_data.empty:
     df_display = st.session_state.scan_data.copy()
     st.divider()
