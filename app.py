@@ -27,9 +27,10 @@ st.markdown("""
 3. 📉 **1H Trend:** Shows "🔻 DIP" if 1H Price < EMA (Buying Chance).
 """)
 
-# --- LOAD WATCHLIST (FIXED) ---
-watchlist_symbols = []  # <--- Initialize here so it always exists!
+# --- 1. INITIALIZE WATCHLIST (Fixes the Error) ---
+watchlist_symbols = []  # <--- This prevents the NameError
 
+# --- 2. LOAD WATCHLIST (If file exists) ---
 if uploaded_file:
     try:
         if uploaded_file.name.endswith('.csv'): 
@@ -47,7 +48,7 @@ if uploaded_file:
     except Exception as e:
         st.sidebar.error(f"Error reading file: {e}")
 
-# --- THE ROBUST SCANNER ---
+# --- 3. THE ROBUST SCANNER ---
 def run_robust_scan():
     q = Query().set_markets('america')
     
@@ -90,7 +91,7 @@ def run_robust_scan():
             lambda x: ((x['change'] / (x['close'] - x['change'])) * 100) if (x['close'] - x['change']) != 0 else 0, axis=1
         ).round(2)
 
-        # 4H Momentum Signal
+        # 4H Momentum Signal (Sniper)
         df['4H Signal'] = df.apply(
             lambda x: '🟢 UP' if x['MACD.macd|240'] > x['MACD.signal|240'] else '🔴 DOWN', axis=1
         )
@@ -118,7 +119,7 @@ if st.button('🔥 Run Dip Finder Scan'):
         try:
             raw_df = run_robust_scan()
             
-            # Apply Watchlist Filter ONLY if the list is not empty
+            # Apply Watchlist Filter ONLY if the list has symbols
             if watchlist_symbols and not raw_df.empty:
                 raw_df = raw_df[raw_df['name'].isin(watchlist_symbols)]
             
@@ -149,6 +150,7 @@ if st.session_state.scan_data is not None and not st.session_state.scan_data.emp
     if not df_display.empty:
         st.success(f"✅ Showing {len(df_display)} Matches")
         
+        # Show columns
         show_cols = ['name', 'close', 'Change %', '4H Signal', '1H Trend', 'premarket_close', 'premarket_change']
         st.dataframe(df_display[show_cols], use_container_width=True)
         
