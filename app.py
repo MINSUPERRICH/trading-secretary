@@ -27,11 +27,31 @@ st.markdown("""
 3. 📉 **1H Trend:** Shows "🔻 DIP" if 1H Price < EMA (Buying Chance).
 """)
 
+# --- LOAD WATCHLIST (FIXED) ---
+watchlist_symbols = []  # <--- Initialize here so it always exists!
+
+if uploaded_file:
+    try:
+        if uploaded_file.name.endswith('.csv'): 
+            df_watch = pd.read_csv(uploaded_file)
+        else: 
+            df_watch = pd.read_excel(uploaded_file)
+        
+        df_watch.columns = df_watch.columns.str.lower().str.strip()
+        target_col = next((c for c in df_watch.columns if 'symbol' in c or 'ticker' in c), None)
+        
+        if target_col:
+            watchlist_symbols = df_watch[target_col].astype(str).str.upper().str.strip().tolist()
+            watchlist_symbols = [s.split(':')[-1] for s in watchlist_symbols]
+            st.sidebar.success(f"✅ Loaded {len(watchlist_symbols)} symbols!")
+    except Exception as e:
+        st.sidebar.error(f"Error reading file: {e}")
+
 # --- THE ROBUST SCANNER ---
 def run_robust_scan():
     q = Query().set_markets('america')
     
-    # Requesting Triple Timeframe + 1H Data (for display only)
+    # Requesting Triple Timeframe + 1H Data
     q.select(
         'name', 'close', 'volume', 'change',
         'premarket_close', 'premarket_change',
@@ -39,7 +59,7 @@ def run_robust_scan():
         'MACD.macd|240', 'MACD.signal|240', # 4H Signal
         'close|1W', 'EMA20|1W',  # Weekly
         'close|240', 'EMA20|240',# 4-Hour
-        'close|60', 'EMA20|60'   # 1-Hour (For Dip Detection)
+        'close|60', 'EMA20|60'   # 1-Hour
     )
     
     q.where(col('volume') > 500000)
@@ -56,7 +76,7 @@ def run_robust_scan():
     if df is None or df.empty:
         return pd.DataFrame()
         
-    # --- TRIPLE FILTER LOGIC (We DO NOT filter by 1H) ---
+    # --- TRIPLE FILTER LOGIC ---
     # 1. Weekly
     df = df[df['close|1W'] > df['EMA20|1W']]
     # 2. Daily
@@ -70,13 +90,12 @@ def run_robust_scan():
             lambda x: ((x['change'] / (x['close'] - x['change'])) * 100) if (x['close'] - x['change']) != 0 else 0, axis=1
         ).round(2)
 
-        # 4H Momentum Signal (Your Sniper Light)
+        # 4H Momentum Signal
         df['4H Signal'] = df.apply(
             lambda x: '🟢 UP' if x['MACD.macd|240'] > x['MACD.signal|240'] else '🔴 DOWN', axis=1
         )
 
-        # 1H Trend Status (The Dip Finder)
-        # If Price < EMA on 1H, it marks it as a DIP
+        # 1H Trend Status (Dip Finder)
         df['1H Trend'] = df.apply(
             lambda x: '🟢 UP' if x['close|60'] > x['EMA20|60'] else '🔻 DIP', axis=1
         )
@@ -99,6 +118,7 @@ if st.button('🔥 Run Dip Finder Scan'):
         try:
             raw_df = run_robust_scan()
             
+            # Apply Watchlist Filter ONLY if the list is not empty
             if watchlist_symbols and not raw_df.empty:
                 raw_df = raw_df[raw_df['name'].isin(watchlist_symbols)]
             
@@ -129,7 +149,6 @@ if st.session_state.scan_data is not None and not st.session_state.scan_data.emp
     if not df_display.empty:
         st.success(f"✅ Showing {len(df_display)} Matches")
         
-        # Reordered columns for trading logic
         show_cols = ['name', 'close', 'Change %', '4H Signal', '1H Trend', 'premarket_close', 'premarket_change']
         st.dataframe(df_display[show_cols], use_container_width=True)
         
