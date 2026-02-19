@@ -19,7 +19,7 @@ with st.sidebar:
     st.header("📂 Upload Watchlist")
     uploaded_file = st.file_uploader("Upload .csv or .xlsx", type=["csv", "xlsx"])
 
-st.title("🚀 Watchlist Secretary (Dip Finder)")
+st.title("🚀 Watchlist Secretary (Dip Finder + Sorting)")
 st.markdown("""
 **Strategy:**
 1. ✅ **Triple Trend:** Price > 20 EMA on **Weekly**, **Daily**, and **4H**.
@@ -27,10 +27,10 @@ st.markdown("""
 3. 📉 **1H Trend:** Shows "🔻 DIP" if 1H Price < EMA (Buying Chance).
 """)
 
-# --- 1. INITIALIZE WATCHLIST (Fixes the Error) ---
-watchlist_symbols = []  # <--- This prevents the NameError
+# --- 1. INITIALIZE WATCHLIST ---
+watchlist_symbols = [] 
 
-# --- 2. LOAD WATCHLIST (If file exists) ---
+# --- 2. LOAD WATCHLIST ---
 if uploaded_file:
     try:
         if uploaded_file.name.endswith('.csv'): 
@@ -52,15 +52,14 @@ if uploaded_file:
 def run_robust_scan():
     q = Query().set_markets('america')
     
-    # Requesting Triple Timeframe + 1H Data
     q.select(
         'name', 'close', 'volume', 'change',
         'premarket_close', 'premarket_change',
-        'EMA20',               # Daily
-        'MACD.macd|240', 'MACD.signal|240', # 4H Signal
-        'close|1W', 'EMA20|1W',  # Weekly
-        'close|240', 'EMA20|240',# 4-Hour
-        'close|60', 'EMA20|60'   # 1-Hour
+        'EMA20',               
+        'MACD.macd|240', 'MACD.signal|240', 
+        'close|1W', 'EMA20|1W',
+        'close|240', 'EMA20|240',
+        'close|60', 'EMA20|60'
     )
     
     q.where(col('volume') > 500000)
@@ -77,31 +76,24 @@ def run_robust_scan():
     if df is None or df.empty:
         return pd.DataFrame()
         
-    # --- TRIPLE FILTER LOGIC ---
-    # 1. Weekly
+    # --- FILTER LOGIC ---
     df = df[df['close|1W'] > df['EMA20|1W']]
-    # 2. Daily
     df = df[df['close'] > df['EMA20']]
-    # 3. 4-Hour
     df = df[df['close|240'] > df['EMA20|240']]
     
     if not df.empty:
-        # Change %
         df['Change %'] = df.apply(
             lambda x: ((x['change'] / (x['close'] - x['change'])) * 100) if (x['close'] - x['change']) != 0 else 0, axis=1
         ).round(2)
 
-        # 4H Momentum Signal (Sniper)
         df['4H Signal'] = df.apply(
             lambda x: '🟢 UP' if x['MACD.macd|240'] > x['MACD.signal|240'] else '🔴 DOWN', axis=1
         )
 
-        # 1H Trend Status (Dip Finder)
         df['1H Trend'] = df.apply(
             lambda x: '🟢 UP' if x['close|60'] > x['EMA20|60'] else '🔻 DIP', axis=1
         )
         
-        # Rounding
         df['change'] = df['change'].round(2)
         df['close'] = df['close'].round(2)
         df['premarket_close'] = df['premarket_close'].fillna(0).round(2)
@@ -119,7 +111,6 @@ if st.button('🔥 Run Dip Finder Scan'):
         try:
             raw_df = run_robust_scan()
             
-            # Apply Watchlist Filter ONLY if the list has symbols
             if watchlist_symbols and not raw_df.empty:
                 raw_df = raw_df[raw_df['name'].isin(watchlist_symbols)]
             
@@ -134,28 +125,45 @@ if st.session_state.scan_data is not None and not st.session_state.scan_data.emp
     df_display = st.session_state.scan_data.copy()
     
     st.divider()
-    st.subheader("🎯 Filter Results")
+    st.subheader("🎯 Filter & Sort")
     
-    col1, col2 = st.columns(2)
+    # --- FILTERS + SORTING ---
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
         search_ticker = st.text_input("🔍 Find Ticker (e.g. NVDA)")
     with col2:
         min_price = st.number_input("💰 Minimum Price ($)", min_value=0, value=0)
+    with col3:
+        # NEW: Sorting Dropdown
+        sort_option = st.selectbox(
+            "🔃 Sort Results By:", 
+            ["Default", "Change % (High to Low)", "Pre-Market % (High to Low)", "Price (High to Low)"]
+        )
     
+    # 1. Apply Filters
     if search_ticker:
         df_display = df_display[df_display['name'].str.contains(search_ticker.upper())]
     if min_price > 0:
         df_display = df_display[df_display['close'] >= min_price]
+        
+    # 2. Apply Sorting (This fixes the Download Order!)
+    if sort_option == "Change % (High to Low)":
+        df_display = df_display.sort_values(by="Change %", ascending=False)
+    elif sort_option == "Pre-Market % (High to Low)":
+        df_display = df_display.sort_values(by="premarket_change", ascending=False)
+    elif sort_option == "Price (High to Low)":
+        df_display = df_display.sort_values(by="close", ascending=False)
     
     if not df_display.empty:
         st.success(f"✅ Showing {len(df_display)} Matches")
         
-        # Show columns
         show_cols = ['name', 'close', 'Change %', '4H Signal', '1H Trend', 'premarket_close', 'premarket_change']
         st.dataframe(df_display[show_cols], use_container_width=True)
         
+        # Download button now uses the SORTED df_display
         csv = df_display.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Report", csv, "Dip_Finder_Report.csv", "text/csv")
+        st.download_button("📥 Download Report (Sorted)", csv, "Sorted_Report.csv", "text/csv")
     else:
         st.warning("No stocks match your specific filters.")
 
