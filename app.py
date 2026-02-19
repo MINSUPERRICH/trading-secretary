@@ -5,7 +5,7 @@ from tradingview_screener import Query, col
 st.set_page_config(page_title="Secure Watchlist Secretary", layout="wide")
 
 # --- 🔒 SECURITY ---
-MY_PASSWORD = st.secrets["APP_PASSWORD"]
+MY_PASSWORD = st.secrets["APP_PASSWORD"] if "APP_PASSWORD" in st.secrets else "rich"
 
 with st.sidebar:
     st.header("🔐 Login")
@@ -19,45 +19,27 @@ with st.sidebar:
     st.header("📂 Upload Watchlist")
     uploaded_file = st.file_uploader("Upload .csv or .xlsx", type=["csv", "xlsx"])
 
-st.title("🚀 Watchlist Secretary (Pre-Market Edition)")
+st.title("🚀 Watchlist Secretary (Dip Finder)")
 st.markdown("""
 **Strategy:**
 1. ✅ **Triple Trend:** Price > 20 EMA on **Weekly**, **Daily**, and **4H**.
-2. 🚀 **Momentum:** TSI Proxy (MACD) is **🟢 UP**.
-3. 🌅 **Pre-Market:** See live 8:00 AM prices in the new columns.
+2. 🚀 **4H Signal:** Light is based on **4-Hour** MACD (Sniper Entry).
+3. 📉 **1H Trend:** Shows "🔻 DIP" if 1H Price < EMA (Buying Chance).
 """)
-
-# --- LOAD WATCHLIST ---
-watchlist_symbols = []
-if uploaded_file:
-    try:
-        if uploaded_file.name.endswith('.csv'): 
-            df_watch = pd.read_csv(uploaded_file)
-        else: 
-            df_watch = pd.read_excel(uploaded_file)
-        
-        df_watch.columns = df_watch.columns.str.lower().str.strip()
-        target_col = next((c for c in df_watch.columns if 'symbol' in c or 'ticker' in c), None)
-        
-        if target_col:
-            watchlist_symbols = df_watch[target_col].astype(str).str.upper().str.strip().tolist()
-            watchlist_symbols = [s.split(':')[-1] for s in watchlist_symbols]
-            st.sidebar.success(f"✅ Loaded {len(watchlist_symbols)} symbols!")
-    except Exception as e:
-        st.sidebar.error(f"Error reading file: {e}")
 
 # --- THE ROBUST SCANNER ---
 def run_robust_scan():
     q = Query().set_markets('america')
     
-    # REQUESTING PRE-MARKET DATA ('premarket_close', 'premarket_change')
+    # Requesting Triple Timeframe + 1H Data (for display only)
     q.select(
         'name', 'close', 'volume', 'change',
-        'premarket_close', 'premarket_change',  # <--- NEW FIELDS
-        'EMA20', 
-        'MACD.macd', 'MACD.signal',
-        'close|1W', 'EMA20|1W',
-        'close|240', 'EMA20|240'
+        'premarket_close', 'premarket_change',
+        'EMA20',               # Daily
+        'MACD.macd|240', 'MACD.signal|240', # 4H Signal
+        'close|1W', 'EMA20|1W',  # Weekly
+        'close|240', 'EMA20|240',# 4-Hour
+        'close|60', 'EMA20|60'   # 1-Hour (For Dip Detection)
     )
     
     q.where(col('volume') > 500000)
@@ -74,28 +56,34 @@ def run_robust_scan():
     if df is None or df.empty:
         return pd.DataFrame()
         
-    # --- FILTER LOGIC ---
-    df = df[df['close'] > df['EMA20']]
+    # --- TRIPLE FILTER LOGIC (We DO NOT filter by 1H) ---
+    # 1. Weekly
     df = df[df['close|1W'] > df['EMA20|1W']]
+    # 2. Daily
+    df = df[df['close'] > df['EMA20']]
+    # 3. 4-Hour
     df = df[df['close|240'] > df['EMA20|240']]
     
-    # Clean up and add columns immediately
     if not df.empty:
-        # Calculate Regular % Change
+        # Change %
         df['Change %'] = df.apply(
             lambda x: ((x['change'] / (x['close'] - x['change'])) * 100) if (x['close'] - x['change']) != 0 else 0, axis=1
         ).round(2)
 
-        # TSI Proxy
-        df['TSI_Proxy'] = df.apply(
-            lambda x: '🟢 UP' if x['MACD.macd'] > x['MACD.signal'] else '🔴 DOWN', axis=1
+        # 4H Momentum Signal (Your Sniper Light)
+        df['4H Signal'] = df.apply(
+            lambda x: '🟢 UP' if x['MACD.macd|240'] > x['MACD.signal|240'] else '🔴 DOWN', axis=1
+        )
+
+        # 1H Trend Status (The Dip Finder)
+        # If Price < EMA on 1H, it marks it as a DIP
+        df['1H Trend'] = df.apply(
+            lambda x: '🟢 UP' if x['close|60'] > x['EMA20|60'] else '🔻 DIP', axis=1
         )
         
         # Rounding
         df['change'] = df['change'].round(2)
         df['close'] = df['close'].round(2)
-        
-        # Handle Pre-Market (Fill NaN with 0 if no pre-market trade yet)
         df['premarket_close'] = df['premarket_close'].fillna(0).round(2)
         df['premarket_change'] = df['premarket_change'].fillna(0).round(2)
 
@@ -106,8 +94,8 @@ if 'scan_data' not in st.session_state:
     st.session_state.scan_data = None
 
 # --- SCAN BUTTON ---
-if st.button('🔥 Run Triple-Confluence Scan'):
-    with st.spinner('Scanning US Market...'):
+if st.button('🔥 Run Dip Finder Scan'):
+    with st.spinner('Scanning W + D + 4H...'):
         try:
             raw_df = run_robust_scan()
             
@@ -119,7 +107,7 @@ if st.button('🔥 Run Triple-Confluence Scan'):
         except Exception as e:
             st.error(f"Scan Error: {e}")
 
-# --- DISPLAY & FILTER SECTION ---
+# --- DISPLAY & FILTER ---
 if st.session_state.scan_data is not None and not st.session_state.scan_data.empty:
     
     df_display = st.session_state.scan_data.copy()
@@ -129,7 +117,7 @@ if st.session_state.scan_data is not None and not st.session_state.scan_data.emp
     
     col1, col2 = st.columns(2)
     with col1:
-        search_ticker = st.text_input("🔍 Find Ticker (e.g. NVDA, TSLA)")
+        search_ticker = st.text_input("🔍 Find Ticker (e.g. NVDA)")
     with col2:
         min_price = st.number_input("💰 Minimum Price ($)", min_value=0, value=0)
     
@@ -139,18 +127,16 @@ if st.session_state.scan_data is not None and not st.session_state.scan_data.emp
         df_display = df_display[df_display['close'] >= min_price]
     
     if not df_display.empty:
-        st.success(f"✅ Showing {len(df_display)} matches")
+        st.success(f"✅ Showing {len(df_display)} Matches")
         
-        # Reorder columns to show Pre-Market info
-        show_cols = ['name', 'close', 'Change %', 'premarket_close', 'premarket_change', 'EMA20', 'TSI_Proxy']
-        
+        # Reordered columns for trading logic
+        show_cols = ['name', 'close', 'Change %', '4H Signal', '1H Trend', 'premarket_close', 'premarket_change']
         st.dataframe(df_display[show_cols], use_container_width=True)
         
         csv = df_display.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Report", csv, "PreMarket_Report.csv", "text/csv")
+        st.download_button("📥 Download Report", csv, "Dip_Finder_Report.csv", "text/csv")
     else:
-        st.warning("No stocks match filters.")
+        st.warning("No stocks match your specific filters.")
 
 elif st.session_state.scan_data is not None:
     st.warning("No Triple Confluence stocks found.")
-
