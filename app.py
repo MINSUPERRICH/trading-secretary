@@ -19,12 +19,12 @@ with st.sidebar:
     st.header("📂 Upload Watchlist")
     uploaded_file = st.file_uploader("Upload .csv or .xlsx", type=["csv", "xlsx"])
 
-st.title("🚀 Watchlist Secretary (RVOL + Sniper Edition)")
+st.title("🚀 Watchlist Secretary (Sniper Edition)")
 st.markdown("""
 **Strategy:**
 1. ✅ **Triple Trend:** Price > 20 EMA on **Weekly**, **Daily**, and **4H**.
 2. 🚀 **4H Signal:** Slope-based logic (Matches TSI Sniper green bars).
-3. 📊 **RVOL:** Shows if volume is higher than average (Strength Confirmation).
+3. 📊 **RVOL:** Volume strength confirmation.
 4. 📉 **1H Trend:** Shows "🔻 DIP" for buying chances.
 """)
 
@@ -52,8 +52,8 @@ def run_robust_scan():
         'name', 'close', 'volume', 'relative_volume_10d_calc', 'change',
         'premarket_close', 'premarket_change',
         'EMA20',               
-        'MACD.macd|240', 'MACD.signal|240',    # Current 4H
-        'MACD.macd[1]|240', 'MACD.signal[1]|240', # Prev 4H for Slope
+        'MACD.macd|240', 'MACD.signal|240',    
+        'MACD.macd[1]|240', 'MACD.signal[1]|240', 
         'close|1W', 'EMA20|1W',  
         'close|240', 'EMA20|240',
         'close|60', 'EMA20|60'   
@@ -65,14 +65,14 @@ def run_robust_scan():
     df = data[1] if isinstance(data, tuple) else data
     if df is None or df.empty: return pd.DataFrame()
         
-    # Apply Triple Confluence Filter
     df = df[df['close|1W'] > df['EMA20|1W']]
     df = df[df['close'] > df['EMA20']]
     df = df[df['close|240'] > df['EMA20|240']]
     
     if not df.empty:
-        # RENAME COLUMNS FOR EXCEL CLARITY
+        # Renaming 'name' to 'Symbol' and others for clarity
         df = df.rename(columns={
+            'name': 'Symbol',
             'relative_volume_10d_calc': 'RVOL',
             'volume': 'Volume',
             'MACD.macd|240': '4H_MACD_Now',
@@ -83,7 +83,6 @@ def run_robust_scan():
 
         df['Change %'] = df.apply(lambda x: ((x['change'] / (x['close'] - x['change'])) * 100) if (x['close'] - x['change']) != 0 else 0, axis=1).round(2)
         
-        # Slope Logic for Sniper matching
         def get_signal(row):
             current_hist = row['4H_MACD_Now'] - row['4H_Signal_Now']
             prev_hist = row['4H_MACD_Prev'] - row['4H_Signal_Prev']
@@ -101,10 +100,10 @@ if 'scan_data' not in st.session_state:
     st.session_state.scan_data = None
 
 if st.button('🔥 Run Dip Finder Scan'):
-    with st.spinner('Scanning with Sniper Logic...'):
+    with st.spinner('Scanning...'):
         raw_df = run_robust_scan()
         if watchlist_symbols and not raw_df.empty:
-            raw_df = raw_df[raw_df['name'].isin(watchlist_symbols)]
+            raw_df = raw_df[raw_df['Symbol'].isin(watchlist_symbols)]
         st.session_state.scan_data = raw_df
 
 if st.session_state.scan_data is not None and not st.session_state.scan_data.empty:
@@ -112,16 +111,15 @@ if st.session_state.scan_data is not None and not st.session_state.scan_data.emp
     st.divider()
     
     col1, col2 = st.columns(2)
-    with col1: search_ticker = st.text_input("🔍 Find Ticker")
+    with col1: search_ticker = st.text_input("🔍 Find Symbol")
     with col2: sort_option = st.selectbox("🔃 Sort By", ["Default", "Change % (High to Low)", "RVOL (High to Low)"])
 
-    if search_ticker: df_display = df_display[df_display['name'].str.contains(search_ticker.upper())]
+    if search_ticker: df_display = df_display[df_display['Symbol'].str.contains(search_ticker.upper())]
     if sort_option == "Change % (High to Low)": df_display = df_display.sort_values(by="Change %", ascending=False)
     elif sort_option == "RVOL (High to Low)": df_display = df_display.sort_values(by="RVOL", ascending=False)
     
-    # Display version
-    st.dataframe(df_display[['name', 'close', 'Change %', 'RVOL', '4H Signal', '1H Trend']], use_container_width=True)
+    # Display using 'Symbol' header
+    st.dataframe(df_display[['Symbol', 'close', 'Change %', 'RVOL', '4H Signal', '1H Trend']], use_container_width=True)
     
-    # Download version
     csv = df_display.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Download Sniper Report", csv, "Sniper_Full_Report.csv", "text/csv")
