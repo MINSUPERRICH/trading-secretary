@@ -19,12 +19,13 @@ with st.sidebar:
     st.header("📂 Upload Watchlist")
     uploaded_file = st.file_uploader("Upload .csv or .xlsx", type=["csv", "xlsx"])
 
-st.title("🚀 Watchlist Secretary (Clean Report Edition)")
+st.title("🚀 Watchlist Secretary (RVOL + Sniper Edition)")
 st.markdown("""
 **Strategy:**
 1. ✅ **Triple Trend:** Price > 20 EMA on **Weekly**, **Daily**, and **4H**.
 2. 🚀 **4H Signal:** Slope-based logic (Matches TSI Sniper green bars).
-3. 📉 **1H Trend:** Shows "🔻 DIP" for buying chances.
+3. 📊 **RVOL:** Shows if volume is higher than average (Strength Confirmation).
+4. 📉 **1H Trend:** Shows "🔻 DIP" for buying chances.
 """)
 
 # --- INITIALIZE WATCHLIST ---
@@ -48,7 +49,7 @@ if uploaded_file:
 def run_robust_scan():
     q = Query().set_markets('america')
     q.select(
-        'name', 'close', 'volume', 'change',
+        'name', 'close', 'volume', 'relative_volume_10d_calc', 'change',
         'premarket_close', 'premarket_change',
         'EMA20',               
         'MACD.macd|240', 'MACD.signal|240',    # Current 4H
@@ -72,6 +73,8 @@ def run_robust_scan():
     if not df.empty:
         # RENAME COLUMNS FOR EXCEL CLARITY
         df = df.rename(columns={
+            'relative_volume_10d_calc': 'RVOL',
+            'volume': 'Volume',
             'MACD.macd|240': '4H_MACD_Now',
             'MACD.signal|240': '4H_Signal_Now',
             'MACD.macd[1]|240': '4H_MACD_Prev',
@@ -80,7 +83,7 @@ def run_robust_scan():
 
         df['Change %'] = df.apply(lambda x: ((x['change'] / (x['close'] - x['change'])) * 100) if (x['close'] - x['change']) != 0 else 0, axis=1).round(2)
         
-        # Slope Logic using new column names
+        # Slope Logic for Sniper matching
         def get_signal(row):
             current_hist = row['4H_MACD_Now'] - row['4H_Signal_Now']
             prev_hist = row['4H_MACD_Prev'] - row['4H_Signal_Prev']
@@ -89,6 +92,7 @@ def run_robust_scan():
         df['4H Signal'] = df.apply(get_signal, axis=1)
         df['1H Trend'] = df.apply(lambda x: '🟢 UP' if x['close|60'] > x['EMA20|60'] else '🔻 DIP', axis=1)
         df['close'] = df['close'].round(2)
+        df['RVOL'] = df['RVOL'].round(2)
 
     return df
 
@@ -109,15 +113,15 @@ if st.session_state.scan_data is not None and not st.session_state.scan_data.emp
     
     col1, col2 = st.columns(2)
     with col1: search_ticker = st.text_input("🔍 Find Ticker")
-    with col2: sort_option = st.selectbox("🔃 Sort By", ["Default", "Change % (High to Low)", "Price (High to Low)"])
+    with col2: sort_option = st.selectbox("🔃 Sort By", ["Default", "Change % (High to Low)", "RVOL (High to Low)"])
 
     if search_ticker: df_display = df_display[df_display['name'].str.contains(search_ticker.upper())]
     if sort_option == "Change % (High to Low)": df_display = df_display.sort_values(by="Change %", ascending=False)
-    elif sort_option == "Price (High to Low)": df_display = df_display.sort_values(by="close", ascending=False)
+    elif sort_option == "RVOL (High to Low)": df_display = df_display.sort_values(by="RVOL", ascending=False)
     
-    # Display version (fewer columns)
-    st.dataframe(df_display[['name', 'close', 'Change %', '4H Signal', '1H Trend']], use_container_width=True)
+    # Display version
+    st.dataframe(df_display[['name', 'close', 'Change %', 'RVOL', '4H Signal', '1H Trend']], use_container_width=True)
     
-    # Download version (full columns with new names)
+    # Download version
     csv = df_display.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Clear Report", csv, "Sniper_Report_Clean.csv", "text/csv")
+    st.download_button("📥 Download Sniper Report", csv, "Sniper_Full_Report.csv", "text/csv")
