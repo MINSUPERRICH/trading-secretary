@@ -1,4 +1,8 @@
 streamlit
 pandas
-tradingview-screener
+numpy
+plotly
 openpyxl
+xlsxwriter
+python-pptx
+kaleido==0.2.1
