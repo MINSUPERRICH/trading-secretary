@@ -19,10 +19,10 @@ with st.sidebar:
     st.header("📂 Upload Watchlist")
     uploaded_file = st.file_uploader("Upload .csv or .xlsx", type=["csv", "xlsx"])
 
-st.title("🚀 Watchlist Secretary (Double Strict Edition)")
+st.title("🚀 Watchlist Secretary (Search & Price Filters)")
 st.markdown("""
 **New Strict Logic Enabled:**
-* 🚫 **Signals will flip to RED/DIP immediately** if the current price drops below the previous candle's close, even if indicators haven't crossed yet.
+* 🚫 **Signals flip to RED/DIP immediately** if the price drops below the previous candle's close (4H and 1H).
 """)
 
 # --- SCANNER LOGIC ---
@@ -60,46 +60,55 @@ def run_robust_scan():
 
         # --- DOUBLE STRICT LOGIC ---
         def get_strict_4h(row):
-            # Rule 1: MACD Histogram Slope
             current_hist = row['MACD.macd|240'] - row['MACD.signal|240']
             prev_hist = row['MACD.macd[1]|240'] - row['MACD.signal[1]|240']
             slope_up = current_hist > prev_hist
-            # Rule 2: Price >= Prev 4H Close
             price_holding = row['close|240'] >= row['close[1]|240']
             return '🟢 UP' if (slope_up and price_holding) else '🔴 DOWN'
 
         def get_strict_1h(row):
-            # Rule 1: Above EMA20 (1H)
             above_ema = row['close|60'] > row['EMA20|60']
-            # Rule 2: Price >= Prev 1H Close (The Filter you requested)
             price_holding = row['close|60'] >= row['close[1]|60']
             return '🟢 UP' if (above_ema and price_holding) else '🔻 DIP'
 
         df['4H Signal'] = df.apply(get_strict_4h, axis=1)
         df['1H Trend'] = df.apply(get_strict_1h, axis=1)
         
-        # Formatting
         df['Change (%)'] = df.apply(lambda x: ((x['change'] / (x['Close ($)'] - x['change'])) * 100) if (x['Close ($)'] - x['change']) != 0 else 0, axis=1).round(2)
         df['Close ($)'] = df['Close ($)'].round(2)
         df['RVOL (Ratio)'] = df['RVOL (Ratio)'].round(2)
 
     return df
 
-# --- UI ---
+# --- UI & INTERACTION ---
 if 'scan_data' not in st.session_state:
     st.session_state.scan_data = None
 
 if st.button('🔥 Run Double Strict Scan'):
-    with st.spinner('Filtering for Real-Time Accuracy...'):
-        raw_df = run_robust_scan()
-        st.session_state.scan_state = raw_df # Save to state
+    with st.spinner('Applying Filters...'):
+        st.session_state.scan_data = run_robust_scan()
 
-if st.session_state.get('scan_state') is not None:
-    df_display = st.session_state.scan_state.copy()
+if st.session_state.scan_data is not None:
+    df_display = st.session_state.scan_data.copy()
     st.divider()
+
+    # --- 🔍 DUAL SEARCH BOXES ---
+    search_col1, search_col2 = st.columns(2)
+    with search_col1:
+        symbol_search = st.text_input("🔍 Search Symbol (e.g. NVDA, TMUS)").upper()
+    with search_col2:
+        price_range = st.slider("💰 Price Range ($)", 0, 1000, (0, 1000))
+
+    # Apply Symbol Filter
+    if symbol_search:
+        df_display = df_display[df_display['Symbol'].str.contains(symbol_search)]
+
+    # Apply Price Range Filter
+    df_display = df_display[(df_display['Close ($)'] >= price_range[0]) & (df_display['Close ($)'] <= price_range[1])]
     
+    # Display Result
     main_cols = ['Symbol', 'Close ($)', 'Change (%)', 'RVOL (Ratio)', '4H Signal', '1H Trend']
     st.dataframe(df_display[main_cols], use_container_width=True)
     
     csv = df_display.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Final Strict Report", csv, "Sniper_DoubleStrict.csv", "text/csv")
+    st.download_button("📥 Download Filtered Report", csv, "Sniper_Filtered.csv", "text/csv")
